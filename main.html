@@ -1,0 +1,198 @@
+<!-- 程序说明 -->
+<!--
+程序调试时间：2022-05-07
+程序功能：通过网页客户端，控制ESP8266【进而控制Arduino Uno IO端口的LED】。并实时显示相关Arduino采集的状态信息
+通讯方式：MQTT
+1，该程序可以作为后续物联网控制的1个标准模板程序。根据实际应用只需要稍作调整即可。
+2，本案例中使用的MQTT服务器是，”然也物联“ ”iot.ranye-iot.net“，其webSocket端口号为8080 
+3，该js中直接应用了2个外部网络端的js，此处暂不必纠结其用处，直接拿来使用即可
+4，实际使用时，可能需要根据实际情况更改：界面元素，JS代码中【服务器地址、端口号、用户名、密码、主题...以及对应的处理函数，比如发布主题、收到订阅主题的处理...】
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <div id="app">
+        {{ message }}
+    </div>
+    <br> <br> <br> 
+    <hr>
+    <!-- 1,LED控制界面 -->
+    <div style="display: flex;">  
+        <div id="led1" >
+            <button style="width: 100px;height: 35px;margin-bottom: 5px;" onclick="led1On();">LED1 ON</button>
+            <br>
+            <button style="width: 100px;height: 35px;margin-bottom: 5px;" onclick="led1Off();">LED1 OFF</button>
+            <div style="width: 50px;height: 50px;background-color: gray;border-radius: 25px;margin: 0 auto;" id="indicator1"></div>
+        </div>
+
+        <div id="led2" style="margin-left: 50px;">
+            <button style="width: 100px;height: 35px;margin-bottom: 5px;" onclick="led2On();">LED2 ON</button>
+            <br>
+            <button style="width: 100px;height: 35px;margin-bottom: 5px;" onclick="led2Off();">LED2 OFF</button>
+            <div style="width: 50px;height: 50px;background-color: gray;border-radius: 25px;margin: 0 auto;" id="indicator2"></div>
+        </div>
+    </div>
+    <hr>
+    <!-- 2,温湿度、光照强度显示 -->
+    <div>
+        <p>室内温度：<span id="temperature">25</span>°C</p>
+        <p>室内湿度：<span id="humidity">70</span>%</p>
+        <p>室内光照：<span id="light">100</span></p>
+    </div>
+    <!-- 3,底部相关备案信息栏 -->
+    <hr>
+    <div>
+        <p>© 2021 Unrivaled. All rights reserved | Design by
+            <!-- <a href="http://www.tangpin.work"> Kevin Liu</a> -->
+            <a href="javascript:;"> Kevin Liu</a>
+        </p>
+        <p><img src="gongan.png" alt=""> <a href="https://beian.miit.gov.cn" class="ICP_info">苏ICP备2021029681号</a> <span>公安备案 32050602011475</span></p>
+
+    </div>
+    <!-- built files will be auto injected -->
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+    <script type="text/javascript">     //Javascript程序，此处应用了2个外部的文件，这2个文件会自动从网络端加载
+        //#region 1，相关与服务器的连接参数，订阅的主题
+        var app = new Vue({
+          el: '#app',
+          data: {
+            message: 'Connectted'
+          }
+        });      
+          var hostname = 'iot.ranye-iot.net',  //网络服务器域名 或 IP地址
+            port = 8080,                       //websocket地址
+            clientId = 'iot2104_5_id',         //网页客户端的id
+            timeout = 5,
+            keepAlive = 100,
+            cleanSession = false,
+            ssl = false,
+            userName = 'iot2104_5',            //网页客户端用户名
+            password = 'psw1012',  
+            topic = 'iot2104/status_info';   //连接成功，首先订阅的主题
+        client = new Paho.MQTT.Client(hostname, port, clientId);  //创建mqtt客户端
+        //建立客户端实例  
+        var options = {
+            invocationContext: {
+                host: hostname,
+                port: port,
+                path: client.path,
+                clientId: clientId
+            },
+
+            timeout: timeout,
+            keepAliveInterval: keepAlive,
+            cleanSession: cleanSession,
+            useSSL: ssl,
+            userName: userName,  
+            password: password,  
+            onSuccess: onConnect,
+            onFailure: function (e) {
+                console.log(e);
+            }
+        };
+        //#endregion
+        //#region 2, 连接成功，并立即订阅主题
+        client.connect(options);
+        //连接服务器并注册连接成功处理事件  
+        function onConnect() {
+            // console.log("onConnected");
+            client.subscribe(topic);   //订阅LED状态主题
+        }
+        //#endregion
+
+        client.onConnectionLost = onConnectionLost;  //注册连接断开处理事件       
+        client.onMessageArrived = onMessageArrived;  //注册消息接收处理事件         
+        function onConnectionLost(responseObject) {  //连接断开时的处理
+            console.log(responseObject);
+            if (responseObject.errorCode !== 0) {
+                console.log("onConnectionLost:" + responseObject.errorMessage);
+                console.log("连接已断开");
+            }
+        }
+
+        //#region 3，接收到订阅的主题消息时，相关的处理【主要是进行界面更新显示】
+        function onMessageArrived(message) {         // 接收到小时时的处理，显示接收到消息的时间、消息内容
+            console.log("收到消息:" + message.payloadString);
+            var str=message.payloadString;
+            var val=new Array(5);
+            val=str.split('|');
+            // console.log(val[0]);console.log(val[1]);console.log(val[2]);console.log(val[3]);console.log(val[4]);
+            var m1=document.getElementById("indicator1");
+            var m2=document.getElementById("indicator2");
+            var m3=document.getElementById("temperature");
+            var m4=document.getElementById("humidity");
+            var m5=document.getElementById("light");
+            //#region  2个LED状态更新显示，1个温湿度、光照的更新显示
+            if(val[0]=="1")  
+            {
+                m1.style.backgroundColor="green";
+            }
+            if(val[0]=="0")
+            {
+                m1.style.backgroundColor="red";
+            }
+
+            if(val[1]=="1")
+            {
+                m2.style.backgroundColor="green";
+            }
+            if(val[1]=="0")
+            {
+                m2.style.backgroundColor="red";
+            }
+            
+            m3.innerHTML=val[2];  //温度显示
+            m4.innerHTML=val[3];  //湿度显示
+            m5.innerHTML=val[4];  //光照强度
+            //#endregion
+        }
+        //#endregion
+        //#region 4，发布主题 【2个LED的控制状态字信息】
+        var topic2="iot2104/led1_control";
+        var topic3="iot2104/led2_control";
+        var flag;
+        // LED1的控制，ON和OFF
+        function led1On()
+        {
+            flag="1Led#1_ON"; 
+            console.log("LED ON-");
+            message = new Paho.MQTT.Message(flag);
+            message.destinationName = topic2;
+            client.send(message);  //发布主题
+        }
+        function led1Off()
+        {
+            flag="1Led#0_OFF";
+            console.log("LED OFF-"); 
+            message = new Paho.MQTT.Message(flag);
+            message.destinationName = topic2;
+            client.send(message);  //发布主题
+        }
+        // LED2的控制,ON和OFF
+        function led2On()
+        {
+            flag="2Led#1_ON"; 
+            console.log("LED ON-");
+            message = new Paho.MQTT.Message(flag);
+            message.destinationName = topic3;
+            client.send(message);  //发布主题
+        }
+        function led2Off()
+        {
+            flag="2Led#0_OFF";
+            console.log("LED OFF-"); 
+            message = new Paho.MQTT.Message(flag);
+            message.destinationName = topic3;
+            client.send(message);  //发布主题
+        }
+        //#endregion
+    </script>
+</body>
+</html>
